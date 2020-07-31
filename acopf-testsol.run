@@ -1,0 +1,101 @@
+## acopf-testsol.run
+## test feasibility/optimality of a given solution (in VRval/VCval)
+
+# read model and data
+#model acopf.mod;
+model acopf-V.mod;
+data case5.dat;
+
+# complete the data
+include acopf_AB.run;
+include acopf_initsymm.run;
+include acopf_constr.run;
+
+# solve
+option randseed 0;
+option presolve 0;
+option solver ipopt;
+option ipopt_options "constr_viol_tol=1e-2 compl_inf_tol=1e-2 dual_inf_tol=1e-2 tol=1e-2";
+#option solver snopt;
+#option solver couenne;
+#option solver bonmin;
+#option solver baron;
+#option baron_options "outlev=1 epsr=1e-6 prfreq=1e3 maxtime=1800";
+
+## random starting point
+let {b in N} VR[b] := Uniform(-10,10);
+let {b in N} VC[b] := Uniform(-10,10);
+let {b in N} SresR[b] := Uniform(SLR[b], SUR[b]);
+let {b in N} SresC[b] := Uniform(SLC[b], SUC[b]);
+
+# read given solution
+data solution.dat;
+# fix
+let {b in N} VR[b] := VRval[b];
+let {b in N} VC[b] := VCval[b];
+fix {b in N} VR[b];
+fix {b in N} VC[b];
+
+## arbitrary voltage = 0 for case5 instance
+#let VC[4] := 0;
+#fix VC[4];
+
+solve;
+
+# show results
+#display SR, SC, IR, IC;
+display VR, VC, V2, SresR, SresC;
+
+# only for acopf-V
+param IRparm{(b,a) in L};
+let {(b,a) in L} IRparm[b,a] := BR[b,a]*VR[b] - BC[b,a]*VC[b] - AR[b,a]*VR[a] + AC[b,a]*VC[a];
+param ICparm{(b,a) in L};
+let {(b,a) in L} ICparm[b,a] := BR[b,a]*VR[b] + BC[b,a]*VC[b] - AR[b,a]*VR[a] - AC[b,a]*VC[a];
+for {(b,a) in L : b < a} {
+  printf " IR[%d,%d] = %g; IR[%d,%d] = %g\n", b,a, IRparm[b,a], a,b, IRparm[a,b];
+  printf " IC[%d,%d] = %g; IC[%d,%d] = %g\n", b,a, ICparm[b,a], a,b, ICparm[a,b];
+}
+
+param lb;
+param ub;
+param body;
+param wrong integer, default 0;
+for {i in 1.._ncons} {
+   let lb := _con[i].lb;
+   let ub := _con[i].ub;
+   let body := _con[i].body;
+   if lb <= body+Eps and body-Eps <= ub then {
+     #printf "%s:  %f <= %f <= %f\n", _conname[i], lb, body, ub;
+   } else if lb >= body+Eps and body-Eps <= ub then {
+     let wrong := wrong + 1;
+     printf "%s:* %f [!<=] %f <= %f\n", _conname[i], lb, body, ub;
+   } else if lb <= body+Eps and body-Eps >= ub then {
+     let wrong := wrong + 1;
+     printf "%s:* %f <= %f <= %f\n", _conname[i], lb, body, ub;
+   } else if lb >= body+Eps and body-Eps >= ub then {
+     let wrong := wrong + 2;
+     printf "%s:* %f [!<=] %f [!<=] %f\n", _conname[i], lb, body, ub;
+   }
+}
+printf "%d unsatisfied constraints over %d\n", wrong, _ncons;
+let wrong := 0;
+for {i in 1.._nvars} {
+   let lb := _var[i].lb;
+   let ub := _var[i].ub;
+   let body := _var[i];
+   if lb <= body+Eps and body-Eps <= ub then {
+     #printf "%s:  %f <= %f <= %f\n", _varname[i], lb, body, ub;
+   } else if lb >= body+Eps and body-Eps <= ub then {
+     let wrong := wrong + 1;
+     printf "%s:* %f [!<=] %f <= %f\n", _varname[i], lb, body, ub;
+   } else if lb <= body+Eps and body-Eps >= ub then {
+     let wrong := wrong + 1;
+     printf "%s:* %f <= %f <= %f\n", _varname[i], lb, body, ub;
+   } else if lb >= body+Eps and body-Eps >= ub then {
+     let wrong := wrong + 2;
+     printf "%s:* %f [!<=] %f [!<=] %f\n", _varname[i], lb, body, ub;
+   }
+}
+printf "%d unsatisfied var bounds over %d\n", wrong, _nvars;
+display generation_costs;
+display solve_result;

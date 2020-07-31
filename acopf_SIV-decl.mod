@@ -1,0 +1,1 @@
+problem acopf_SIV: VR, VC, V2, SgenR, SgenC, IR, IC, SR, SC, gencost, powerflowR, powerflowC, powerinjR, powerinjC, ohm1R, ohm1C, ohm2R, ohm2C, powerbound, V2def, phasediff1, phasediff2, phasediff3, reference1, reference2;

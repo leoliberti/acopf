@@ -1,0 +1,229 @@
+## acopf.run
+
+option randseed 0;
+
+param sp symbolic;
+let sp := $startpt;
+
+param formulation_type symbolic;
+let formulation_type := "cartesian";
+
+## common formulation parameters and decision variables
+include "parameters.mod";
+include "decvars.mod";
+
+# read model and data
+model acopf.mod;  # symlink; this is decided in acopf.sh
+data acopf.dat;   # symlink; this is decided in acopf.sh
+
+## DEBUG: some case files
+#data case5.dat;
+#data case5_triangle.dat;
+#data case9.dat;
+#data case14.dat;
+
+# complete the branch data when it is symmetric
+let {(a,b,i) in L diff L0} SU[a,b,i] := SU[b,a,i];
+let {(a,b,i) in L diff L0} status[a,b,i] := status[b,a,i];
+
+# compute Y matrices
+let {(b,a,i) in L0} YffR[b,a,i] := r[b,a,i] / ((r[b,a,i]^2+x[b,a,i]^2)*tau[b,a,i]^2);
+let {(b,a,i) in L0} YffC[b,a,i] := (bb[b,a,i]*(r[b,a,i]^2+x[b,a,i]^2)-2*x[b,a,i]) / (2*(r[b,a,i]^2+x[b,a,i]^2)*tau[b,a,i]^2);
+let {(b,a,i) in L0} YftR[b,a,i] := -(r[b,a,i]*cos(nu[b,a,i]) + x[b,a,i]*sin(nu[b,a,i]))/((r[b,a,i]^2 + x[b,a,i]^2)*tau[b,a,i]);
+let {(b,a,i) in L0} YftC[b,a,i] := -(r[b,a,i]*sin(nu[b,a,i]) - x[b,a,i]*cos(nu[b,a,i]))/((r[b,a,i]^2 + x[b,a,i]^2)*tau[b,a,i]);
+let {(b,a,i) in L0} YtfR[b,a,i] := (x[b,a,i]*sin(nu[b,a,i]) - r[b,a,i]*cos(nu[b,a,i]))/((r[b,a,i]^2 + x[b,a,i]^2)*tau[b,a,i]);
+let {(b,a,i) in L0} YtfC[b,a,i] := (r[b,a,i]*sin(nu[b,a,i]) + x[b,a,i]*cos(nu[b,a,i]))/((r[b,a,i]^2 + x[b,a,i]^2)*tau[b,a,i]);
+let {(b,a,i) in L0} YttR[b,a,i] := r[b,a,i]/(r[b,a,i]^2+x[b,a,i]^2);
+let {(b,a,i) in L0} YttC[b,a,i] := (bb[b,a,i]*(r[b,a,i]^2+x[b,a,i]^2)-2*x[b,a,i]) / (2*(r[b,a,i]^2+x[b,a,i]^2));
+
+## DEBUG: Y matrices
+#print "Y matrices:";
+#for {(b,a,i) in L0} {
+#  printf "Y(%d,%d,%d) =\n", b,a,i;
+#  printf "  (%.3f + i %.3f , %.3f + i %.3f)\n", YffR[b,a,i], YffC[b,a,i], YftR[b,a,i], YftC[b,a,i];
+#  printf "  (%.3f + i %.3f , %.3f + i %.3f)\n", YtfR[b,a,i], YtfC[b,a,i], YttR[b,a,i], YttC[b,a,i];
+#}
+
+### solve
+#option solver ipopt;
+#option solver cplex;
+option solver snopt;
+#option snopt_options "outlev=2";
+#option solver "/Users/liberti/ampl/knitro";
+#option solver knitro_options "outlev=1";
+#option solver couenne;
+#option solver bonmin;
+#option solver mosek;
+### Baron with options:
+option solver baron;  ## don't use with polar formulations
+##maxiter=0 is "only root node preprocessing"
+option baron_options "outlev=1 epsr=1e-6 prfreq=1e3 maxtime=180 maxiter=0";
+#maxiter=1 is "stop after root node" (may establish feasibility)
+#option baron_options "outlev=1 epsr=1e-6 prfreq=1e3 maxtime=180 maxiter=1";
+## just run baron to optimality
+#option baron_options "outlev=1 epsr=1e-6 prfreq=1e3";
+
+# random starting point
+param rndM := 5;
+if (sp) == "rnd" then {
+  if formulation_type == "cartesian" then {
+    # printf "%s OK\n", formulation_type;
+    let {b in B} VR[b] := Uniform(-rndM,rndM);
+    let {b in B} VC[b] := Uniform(-rndM,rndM);
+  } else {
+    let {b in B} v[b] := Uniform(0,rndM);
+    let {b in B} theta[b] := Uniform(-rndM,rndM);
+  }
+  let {b in B, g in G[b]} SgenR[b,g] := Uniform(-rndM,rndM);
+  let {b in B, g in G[b]} SgenC[b,g] := Uniform(-rndM,rndM);
+  #let {(b,a,i) in L} IR[b,a,i] := Uniform(-rndM,rndM);
+  #let {(b,a,i) in L} IC[b,a,i] := Uniform(-rndM,rndM);
+  #let {(b,a,i) in L} SR[b,a,i] := Uniform(-rndM,rndM);
+  #let {(b,a,i) in L} SC[b,a,i] := Uniform(-rndM,rndM);
+} else {
+  if formulation_type == "cartesian" then {
+    let {b in B} VR[b] := Vm[b]*cos(Va[b]);
+    let {b in B} VC[b] := Vm[b]*sin(Va[b]);
+  } else {
+    let {b in B} v[b] := Vm[b];
+    let {b in B} theta[b] := Va[b];
+  }
+}
+
+#### DEBUG: FIX VARS, SEE INFEAS ####
+## for cartesian formulations
+# param VRsol{B};
+# param VCsol{B};
+# param IRsol{L0};
+# param ICsol{L0};
+# param IRrev{L0};
+# param ICrev{L0};
+# param SRsol{L0};
+# param SCsol{L0};
+# param SRrev{L0};
+# param SCrev{L0};
+# # these casesol.dat files are generated using computeSol.m in matlab
+# #data case5sol.dat;
+# #data case5_triangle-sol.dat;
+# data case14sol.dat;
+# let {b in B} VR[b] := VRsol[b];
+# let {b in B} VC[b] := VCsol[b];
+# let {(b,a,i) in L0} IR[b,a,i] := IRsol[b,a,i];
+# let {(b,a,i) in L0} IC[b,a,i] := ICsol[b,a,i];
+# let {(b,a,i) in L0} IR[a,b,i] := IRrev[b,a,i];
+# let {(b,a,i) in L0} IC[a,b,i] := IRrev[b,a,i];
+# let {(b,a,i) in L0} SR[b,a,i] := SRsol[b,a,i];
+# let {(b,a,i) in L0} SC[b,a,i] := SCsol[b,a,i];
+# let {(b,a,i) in L0} SR[a,b,i] := SRrev[b,a,i];
+# let {(b,a,i) in L0} SC[a,b,i] := SCrev[b,a,i];
+# fix {b in B} VR[b];
+# fix {b in B} VC[b];
+# fix {(b,a,i) in L} IR[b,a,i];
+# fix {(b,a,i) in L} IC[b,a,i];
+# fix {(b,a,i) in L} SR[b,a,i];
+# fix {(b,a,i) in L} SC[b,a,i];
+#####################################
+## for Jabr's relaxation
+#data acopf_H.out;
+#let {(b,a) in R} c[b,a] := csp[b,a];
+#let {(b,a) in R} s[b,a] := ssp[b,a];
+#fix {(b,a) in R} c[b,a];
+#fix {(b,a) in R} s[b,a];
+#####################################
+
+# warn if more than one reference bus
+set RB default {b in B : busType[b] == 3};
+if card(RB) > 1 then {
+  printf "WARNING: found more than one reference bus (could yield infeasibility)\n";
+}
+printf "reference bus set (%d elts):", card(RB);
+for {b in RB} {
+  printf " %d", b;
+}
+printf "\n";
+
+
+# call solver
+#expand > acopfexpanded.mod;
+solve;
+
+# retrieve solution values
+if formulation_type == "cartesian" then {
+  let {b in B} Vre[b] := VR[b];
+  let {b in B} Vim[b] := VC[b];
+  let {b in B} Vmag[b] := sqrt(max(Vre[b]^2 + Vim[b]^2,0));
+  for {b in B} {
+    if abs(Vmag[b]) > myZero then {
+      let Vang[b] := acos(max(min(Vre[b] / Vmag[b],1.0),-1.0));
+    }
+  }
+} else {
+  let {b in B} Vmag[b] := v[b];
+  let {b in B} Vang[b] := theta[b];  
+  let {b in B} Vre[b] := Vmag[b]*cos(Vang[b]);
+  let {b in B} Vim[b] := Vmag[b]*sin(Vang[b]);
+}
+
+# show results
+display SgenR, SgenC;
+display Vre, Vim, Vmag, Vang;
+
+param lb;
+param ub;
+param body;
+param wrong integer, default 0;
+for {i in 1.._ncons} {
+   let lb := _con[i].lb;
+   let ub := _con[i].ub;
+   let body := _con[i].body;
+   if lb <= body+Eps and body-Eps <= ub then {
+     ## feasible
+     #printf "%s:  %f <= %f <= %f\n", _conname[i], lb, body, ub;
+   } else if lb >= body+Eps and body-Eps <= ub then {
+     let wrong := wrong + 1;
+     printf "%s:* %f [!<=] %f <= %f\n", _conname[i], lb, body, ub;
+   } else if lb <= body+Eps and body-Eps >= ub then {
+     let wrong := wrong + 1;
+     printf "%s:* %f <= %f <= %f\n", _conname[i], lb, body, ub;
+   } else if lb >= body+Eps and body-Eps >= ub then {
+     let wrong := wrong + 2;
+     printf "%s:* %f [!<=] %f [!<=] %f\n", _conname[i], lb, body, ub;
+   }
+}
+printf "%d unsatisfied constraints over %d\n", wrong, _ncons;
+let wrong := 0;
+for {i in 1.._nvars} {
+   let lb := _var[i].lb;
+   let ub := _var[i].ub;
+   let body := _var[i];
+   if lb <= body+Eps and body-Eps <= ub then {
+     ## feasible
+     #printf "%s:  %f <= %f <= %f\n", _varname[i], lb, body, ub;
+   } else if lb >= body+Eps and body-Eps <= ub then {
+     let wrong := wrong + 1;
+     printf "%s:* %f [!<=] %f <= %f\n", _varname[i], lb, body, ub;
+   } else if lb <= body+Eps and body-Eps >= ub then {
+     let wrong := wrong + 1;
+     printf "%s:* %f <= %f <= %f\n", _varname[i], lb, body, ub;
+   } else if lb >= body+Eps and body-Eps >= ub then {
+     let wrong := wrong + 2;
+     printf "%s:* %f [!<=] %f [!<=] %f\n", _varname[i], lb, body, ub;
+   }
+}
+printf "%d unsatisfied var bounds over %d\n", wrong, _nvars;
+
+## active constraints
+param theslack default 0;
+param dualval default 0;
+printf "active inequalities:\n";
+for {i in 1.._ncons} {
+   let theslack := _con[i].slack;
+   let dualval := _con[i].dual;
+   # only look at inequalities
+   if abs(_con[i].ub - _con[i].lb) >= myZero and dualval != 0 then {
+     printf "%s: slack=%.6f dualvar=%.6f\n", _conname[i], theslack, dualval;
+   }
+}
+
+printf "costs = %.6f\n", _obj[1];
+display solve_result;
